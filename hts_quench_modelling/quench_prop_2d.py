@@ -102,11 +102,12 @@ class CoreSolverParams:
 @dataclass
 class OtherParams:
     # ----------------- Variable parameters -----------------
-    detection_voltage_per_node: float = 0.01 # V
+    detection_voltage: float = 0.01 # V
     detection_delay: float = 0.005 # s
-    detection_validation: float = 0.01 # s, TODO: Will in future check voltage above limit for this time
+    detection_validation: float = 0.01 # s
     decay_time: float = 0.0036 # s (total_current * inductance / maximum dump V)
-    tap_nodes: int = 1 # number of nodes covered by taps, from heater (i.e. set to 1 if just want to use the heater node)
+    tap_span_1sided: int = 0 # Number of nodes on one side of voltage tap span versus central point, from heater plus offset below (i.e. set to 0 if just want to use a single node)
+    tap_offset: int = 0 # Offset versus heater pulse
 
 
 @dataclass
@@ -130,15 +131,21 @@ class SolverSolution:
     end_growth_rate_total: float
     voltages: np.ndarray
     U_temps: np.ndarray
+    T_cs: float
+    T_norm: float
     T_c: float
     total_current: float
     heater_pulse: float
     heater_duration: float
     temp_limit: int
-    time_to_temp_limit_from_T_c: float
+    time_to_T_cs: float
+    time_to_T_norm: float
+    time_to_T_c: float
+    time_to_temp_limit: float
     end_peak_temp: float
     end_peak_dT_dt: float
     mqe: float
+    quenched: bool
     fixed_charts: Optional[plt.Figure] = None
     evolve_charts: Optional[FuncAnimation] = None
 
@@ -146,12 +153,12 @@ class SolverSolution:
 @dataclass
 class DetectionSolution:
     tap_voltages: np.ndarray
-    detection_time: float
-    detection_peak_temp: float
-    detection_validn_peak_temp: float
-    detection_validn_delay_peak_temp: float
-    detection_validn_delay_decay_peak_temp: float
     target_detection_time: float
+    detection_time: Optional[float] = None
+    detection_peak_temp: Optional[float] = None
+    detection_delay_peak_temp: Optional[float] = None
+    detection_delay_decay_peak_temp: Optional[float] = None
+    min_det_v_no_false_pos: Optional[float] = None
 
 
 class SolverFailure(Exception):
@@ -167,10 +174,10 @@ def print_results(result):
     print("Final propagation velocity (longitudinal) = " + str(round(result['end_prop_velocity_long'] * 100, 1)) + " cm/s")
     print("Average propagation velocity (radial) = " + str(round(result['avg_prop_velocity_rad'] * 100, 1)) + " cm/s")
     print("Final propagation velocity (radial) = " + str(round(result['end_prop_velocity_rad'] * 100, 1)) + " cm/s")
-    if np.isfinite(result['time_to_temp_limit_from_T_c']):
-        print("Time to " + str(result['temp_limit']) + "K = " + str(int(result['time_to_temp_limit_from_T_c']*1000)) + " ms")
+    if np.isfinite(result['time_to_temp_limit']) and np.isfinite(result['time_to_T_c']):
+        print("Time from T_c to " + str(result['temp_limit']) + "K = " + str(int((result['time_to_temp_limit'] - result['time_to_T_c'])*1000)) + " ms")
     else:
-        print("Time to " + str(result['temp_limit']) + "K = N/A")
+        print("Time from T_c to " + str(result['temp_limit']) + "K = N/A")
     print("Final peak temperature = " + str(round(result['end_peak_temp'], 1)) + " K")
     print("Final peak temperature derivative = " + str(round(result['end_peak_dT_dt'], 1)) + " K/s")
     if np.isfinite(result['mqe']):
@@ -178,7 +185,7 @@ def print_results(result):
     print("Detection time = " + str(int(result['detection_time']*1000)) + " ms")
     print("Target detection time = " + str(int(result['target_detection_time']*1000)) + " ms")
     print("Peak temperature at detection = " + str(int(result['detection_peak_temp'])) + " K")
-    print("Peak temperature after dump resistor = " + str(int(result['detection_validn_delay_decay_peak_temp'])) + " K")
+    print("Peak temperature after dump resistor = " + str(int(result['detection_delay_decay_peak_temp'])) + " K")
 
     display(result['fixed_charts'])
     display(HTML(result['evolve_charts'].to_jshtml()))
@@ -347,6 +354,7 @@ def simulate_tape(p):
         time_to_temp_limit = np.nan if len(sol.t_events[0]) == 0 else sol.t_events[0][0]
 
         return {'outcome': outcome,
+                'quenched': end_peak_dT_dt > 0 and outcome != below_T_cs.label,
                 'temps': sol.y,
                 'times': sol.t,
                 'end_peak_dT_dt': end_peak_dT_dt,
@@ -485,6 +493,7 @@ def simulate_tape(p):
         
     r = run_solver(heater_pulse, node_lengths)
     outcome = r['outcome']
+    quenched = r['quenched']
     temps = r['temps']
     times = r['times']
     end_peak_dT_dt = r['end_peak_dT_dt']
@@ -543,7 +552,6 @@ def simulate_tape(p):
     avg_prop_velocity_rad = np.nan if (prop_vel_rad[-1] == 0 or not np.isfinite(prop_vel_rad[-1])) else np.average(prop_vel_rad[-idx_rad:])
     avg_prop_velocity_long = np.nan if (prop_vel_long[-1] == 0 or not np.isfinite(prop_vel_long[-1])) else np.average(prop_vel_long[-idx_long:])
 
-    time_to_temp_limit_from_T_c = time_to_temp_limit - np.interp(T_c, np.max(temps, axis=0), times) # i.e. time to reach temperature limit after reaching critical temperature
     mqe = heater_pulse * p.heater_duration if p.find_mqe else np.nan
 
     solution = {
@@ -566,15 +574,21 @@ def simulate_tape(p):
         'end_growth_rate_total': growth_rate_total[-1],
         'voltages': voltages,
         'U_temps': U_temps,
+        'T_cs': T_cs,
+        'T_norm': T_norm,
         'T_c': T_c,
         'total_current': total_current,
         'heater_pulse': heater_pulse,
         'heater_duration': p.heater_duration,
         'temp_limit': p.temp_limit,
-        'time_to_temp_limit_from_T_c': time_to_temp_limit_from_T_c,
+        'time_to_T_cs': np.interp(T_cs, np.max(temps, axis=0), times),
+        'time_to_T_norm': np.interp(T_norm, np.max(temps, axis=0), times),
+        'time_to_T_c': np.interp(T_c, np.max(temps, axis=0), times),
+        'time_to_temp_limit': time_to_temp_limit,
         'end_peak_temp': max(temps[:,-1]),
         'end_peak_dT_dt': end_peak_dT_dt,
-        'mqe': mqe
+        'mqe': mqe,
+        'quenched': quenched
     }
 
     # ----------------- Setup charts -----------------
@@ -715,31 +729,54 @@ def simulate_tape(p):
 
 
 def detection_stats(p, s):
-    #TODO: Replace these interp1d with np.interp if don't need the extrapolation function?
-    fn_U_at_temps = interp1d(s.temp_grid[1:], s.U_temps, bounds_error=False, fill_value=(0, np.nan))
-    fn_time_to_peak_temps = interp1d(np.max(s.temps, axis=0), s.times, bounds_error=False, fill_value=(0, np.nan))
-    fn_peak_temps_at_time = interp1d(s.times, np.max(s.temps, axis=0), fill_value="extrapolate")
+    U_limit_temp = np.interp(s.temp_limit, s.temp_grid[1:], s.U_temps, right=np.nan)
+    target_detection_time = U_limit_temp / s.total_current**2 - p.detection_delay - p.decay_time/2
+    tap_l = s.heater_node + p.tap_offset - p.tap_span_1sided
+    tap_r = s.heater_node + p.tap_offset + p.tap_span_1sided + 1
+    assert tap_l >= 0, "Inner voltage tap is past the end of the coil"
+    assert tap_r <= s.voltages.shape[0], "Outer voltage tap is past the end of the coil"
+    tap_voltages = np.sum(s.voltages[tap_l : tap_r], axis=0)
 
-    U_limit_temp = fn_U_at_temps(s.temp_limit)[()]
-    time_to_T_c = fn_time_to_peak_temps(s.T_c)[()]
-    target_detection_time = U_limit_temp / s.total_current**2 - p.detection_delay - p.detection_validation - p.decay_time/2
+    det_sol = {
+        'tap_voltages': tap_voltages,
+        'target_detection_time': target_detection_time
+    }
 
-    tap_voltages = np.sum(s.voltages[s.heater_node : s.heater_node + p.tap_nodes], axis=0) # TODO: Will need to update once insulation removed / partial, and consider both sides
-    detection_time = interp1d_l_bounded_extrap_r_fill(p.detection_voltage_per_node * p.tap_nodes, tap_voltages, s.times, 0, np.nan) - time_to_T_c # Time from passing T_c to reaching voltage limit, which scales with tap spacing
-    detection_peak_temp = fn_peak_temps_at_time(detection_time + time_to_T_c)[()]
-    detection_validn_peak_temp = fn_peak_temps_at_time(detection_time + p.detection_validation + time_to_T_c)[()]
-    detection_validn_delay_peak_temp = fn_peak_temps_at_time(detection_time + p.detection_validation + p.detection_delay + time_to_T_c)[()]
-    detection_validn_delay_decay_peak_temp = fn_peak_temps_at_time(detection_time + p.detection_validation + p.detection_delay + p.decay_time/2 + time_to_T_c)[()]
+    # Calculate detection time and peak temperatures at various times by checking for sufficiently long period in excess of voltage threshold
+    gran_v_valid = None
+    detection_time = None
+    if p.detection_validation == 0:       
+        if np.any(tap_voltages > p.detection_voltage):
+            idx = np.argmax(tap_voltages > p.detection_voltage)
+            if idx == 0:
+                detection_time = s.times[0]
+            else:
+                detection_time = np.interp(p.detection_voltage, tap_voltages[idx-1:idx+1], s.times[idx-1:idx+1])
+    else:
+        gran = 10
+        gran_t = np.arange(s.times[0], s.times[-1], p.detection_validation / gran)
+        gran_v = np.interp(gran_t, s.times, tap_voltages)
+        gran_v_valid = np.lib.stride_tricks.sliding_window_view(gran_v, gran + 1).min(axis=1)
+        if np.any(gran_v_valid > p.detection_voltage):
+            detection_time = gran_t[np.argmax(gran_v_valid > p.detection_voltage)] + p.detection_validation
 
-    return DetectionSolution(
-        tap_voltages=tap_voltages,
-        detection_time=detection_time,
-        detection_peak_temp=detection_peak_temp,
-        detection_validn_peak_temp=detection_validn_peak_temp,
-        detection_validn_delay_peak_temp=detection_validn_delay_peak_temp,
-        detection_validn_delay_decay_peak_temp=detection_validn_delay_decay_peak_temp,
-        target_detection_time=target_detection_time
-    )
+    if detection_time is not None:
+        max_ts = np.max(s.temps, axis=0)
+        detection_peak_temp = np.interp(detection_time, s.times, max_ts, right=np.nan) # Including validation
+        detection_delay_peak_temp = np.interp(detection_time + p.detection_delay, s.times, max_ts, right=np.nan)
+        detection_delay_decay_peak_temp = np.interp(detection_time + p.detection_delay + p.decay_time/2, s.times, max_ts, right=np.nan)
+
+        det_sol.update({
+            'detection_time': detection_time,
+            'detection_peak_temp': detection_peak_temp,
+            'detection_delay_peak_temp': detection_delay_peak_temp,
+            'detection_delay_decay_peak_temp': detection_delay_decay_peak_temp            
+        })
+
+    if not s.quenched:
+        det_sol['min_det_v_no_false_pos'] = max(tap_voltages) if gran_v_valid is None else max(gran_v_valid) #TODO: Use this to decide whether detection is valid above
+
+    return DetectionSolution(**det_sol)
 
 
 def shallow_asdict(obj):
@@ -786,3 +823,77 @@ def tornado_plot(val, sens_results, sens_pct):
     plt.close(fig)
 
     return fig
+
+
+def plot_single_det_sweep(result, x, y, chartsplit, scalar, nodes_per_turn, xlabel, ylabel, legendlabel, chartlabel):
+    result["x_gp"] = result[x] // nodes_per_turn
+
+    charts = len(result[chartsplit].unique())
+    fig, axes = plt.subplots(1, charts, figsize=(5*charts, 5), sharey=True)
+    for ax, (det_v, gp_det_v) in zip(axes, result.groupby(chartsplit)):
+        for sec, gp_sec in gp_det_v.groupby("x_gp"):
+            ax.plot(
+                np.mod(gp_sec[x], nodes_per_turn),
+                np.round(gp_sec[y]*scalar),
+                label=str(sec)
+            )
+        ax.set_title(chartlabel.format(round(det_v*scalar)))
+        ax.set_xlabel(xlabel)
+        ax.grid(True)
+    axes[0].set_ylabel(ylabel)
+    axes[-1].legend(title=legendlabel, bbox_to_anchor=(1.05, 1))
+
+    plt.tight_layout()
+    plt.close(fig)
+    return fig
+
+
+def plot_double_det_sweep(result, grid_pts, x, y, z, chartsplit, scalar, nodes_per_turn, xlabel, ylabel, legendlabel, chartlabel):
+    corners = [0.1, 0.9, 0.9, 0.1]
+
+    result["x_gp"] = result[x] // nodes_per_turn
+    result["y_gp"] = result[y] // nodes_per_turn
+
+    cmap = plt.get_cmap('plasma_r')
+    figs = []
+
+    for det_v, gp_det_v in result.groupby(chartsplit):
+        zlim = (0, gp_det_v[z].max()*scalar)
+        norm = plt.Normalize(zlim[0], zlim[1])
+
+        fig, axes = plt.subplots(grid_pts, grid_pts, figsize=(14,14), sharex=True, sharey=True)
+        fig.subplots_adjust(left=corners[0], right=corners[1], top=corners[2], bottom=corners[3], wspace=0, hspace=0)
+        fig.suptitle(chartlabel.format(round(det_v*scalar), fontsize=16))
+
+        for (x_sec, y_sec), gp in gp_det_v.groupby(["x_gp", "y_gp"]):
+            ax = axes[y_sec, x_sec]
+            grid = gp.pivot(index=y, columns=x, values=z)
+            ax.pcolormesh(np.mod(grid.columns,nodes_per_turn), np.mod(grid.index,nodes_per_turn), grid.values*scalar, cmap=cmap, norm=norm, shading="nearest")
+
+            if y_sec != grid_pts - 1:
+                ax.tick_params(labelbottom=False)
+            if x_sec != 0:
+                ax.tick_params(labelleft=False)
+
+            ax.tick_params(labelsize=6)  
+
+        sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+        fig.colorbar(sm, ax=axes.ravel().tolist(), label=legendlabel, shrink=0.8, pad=0.02)
+
+        fig.canvas.draw()
+        for i in range(1, grid_pts):
+            pos_x = axes[-1,i].get_position()
+            pos_y = axes[i,0].get_position()
+            fig.text(pos_x.x0 + pos_x.width/2, pos_x.y0*3/4, f"+{i*nodes_per_turn}", ha="center", fontsize=10)
+            fig.text(pos_y.x0*3/4, pos_y.y0 + pos_y.height/2, f"+{i*nodes_per_turn}", rotation=90, va="center", fontsize=10) 
+            
+        xlabel_pos = (axes[-1,0].get_position().x0 + axes[-1,-1].get_position().x1)/2
+        ylabel_pos = (axes[0,0].get_position().y0 + axes[-1,0].get_position().y1)/2
+
+        fig.supxlabel(xlabel, x=xlabel_pos, y=corners[3]/2)
+        fig.supylabel(ylabel, x=corners[0]/2, y=ylabel_pos)
+        plt.close(fig)
+        figs.append(fig)
+
+    return figs
