@@ -23,6 +23,8 @@ The figures below provide an overview of the model output:
 ## Validation
 Aspects of the model have been tested in isolation to check for sensible behaviour, and the output has been validated against published results where possible.
 
+Note that the "time to 300K" figures are all measured from when the tape first reaches T_c.
+
 ### Verification
 Grid convergence tested on both models by halving and doubling granularity. Note that different run setups were used for the 2 models, so they are not directly comparable as for the figures above.
 
@@ -34,18 +36,18 @@ See the following in *results* dictionary:
 
 | Result | Base | Node gap x0.5 | Node gap x2 |
 |---|---|---|---|
-| Time to 300K (ms), 5W pulse | 44 | 44 | 43 |
-| Propagation velocity (cm/s), 5W pulse | 72.8 | 73.8 | 73.0 |
-| Minimum quench energy (mJ) | 3.54 | 3.57 | 3.47 |
+| Time to 300K (ms), 5W pulse | 43 | 43 | 42 |
+| Propagation velocity (cm/s), 5W pulse | 70.9 | 71.5 | 71.9 |
+| Minimum quench energy (mJ) | 3.79 | 3.81 | 3.68 |
 
 **2D model**
 See "Node spacing test" in *results* dictionary
 
 | Result | Base | Node gap x0.5 | Node gap x2 |
 |---|---|---|---|
-| Time to 300K (ms), 6W pulse | 60 | 59 | 60 |
-| Propagation velocity, longitudinal (cm/s), 6W pulse | 53.4 | 56.3 | 53.6 |
-| Minimum quench energy (mJ) | 17.8 | 17.2 | 17.8 |
+| Time to 300K (ms), 6W pulse | 59 | 59 | 58 |
+| Propagation velocity, longitudinal (cm/s), 6W pulse | 52.7 | 52.7 | 51.0 |
+| Minimum quench energy (mJ) | 18.8 | 19.1 | 18.4 |
 
 The 2D model was regression tested against the 1D model using the following setup:
 - Radial conductivity switched off
@@ -61,29 +63,29 @@ The table below summarises the comparison (all assuming 5W heater pulse, other t
 
 | Result | 1D | 2D |
 |---|---|---|
-| Time to 300K (ms) | 44 | 44 |
-| Propagation velocity (cm/s) | 72.8  | 74.5 |
-| Minimum quench energy (mJ) | 3.54 | 3.55 |
-| Detection time (ms) | 13.0 | 13.5 |
-| Temperature after delay / validation / decay (K) | 184 | 184 |
+| Time to 300K (ms) | 43 | 43 |
+| Propagation velocity (cm/s) | 70.9  | 70.6 |
+| Minimum quench energy (mJ) | 3.79 | 3.80 |
+| Detection time, incl. validation period (ms) | 23 | 21 |
+| Temperature after delay / validation / decay (K) | 187 | 189 |
 
 An energy balance test was carried out in the 2D model to check that no energy was being created or destroyed. This is printed when running the "Energy balance test" entry in the *results* dictionary in the 2D model (the test results are not stored), and compares:
 - Change in heat over all nodes (calculated as the temperature integral of specific heat, times node mass)
 - Ohmic heating + heater pulse, taken as output from the solver
 
-This showed a maximum relative error of 0.09%.
+This showed a maximum relative error of 0.07%.
 
-### Validation
+### Comparison to published results
 The 1D model has been compared to various results from J. van Nugteren's thesis "High Temperature Superconductor Accelerator Magnets", primarily Fig. 2.37 and Table 5.1. Key figures were initially quite different (time to 300K, normal zone velocity, minimum quench energy), and the following adjustments were made to improve the reconciliation:
 - Model: Correct dimensions. Scaling of critical surface fit applied to obtain engineering current density, to match section 5.2.1. Normal zone defined using average of current sharing and critical temperature. Disturbance applied for initial period rather than only at time 0.
 - Material properties: Directly sourced thermal conductivity and resistivity, rather than relying on Wiedemann-Franz with a fixed Lorenz number (to improve modelling in the key range around current sharing / critical temperatures). Significantly reduced the RRR of the silver layer of the tape to a plausible value, based on check using 2 micron layer thickness and Drude invariant.
 
 After applying these updates, the following results were obtained (see "Main result, fig 2.37" entry in *results* dictionary of 1D model) and compared against those from the thesis (these values and reference shown in square brackets):
 - Inputs: field = 20T, angle = 84 degrees, current density = 970 A/mm^2, initial temperature = 4.2K, initial disturbance = 5W for 10ms, detection voltage = 10mV, voltage tap spacing = 1mm, total detection delay / validation / average decay time = 16.8ms
-- Single front stable propagation velocity = 73cm/s [c.67cm/s once stabilised - figure 2.37]
-- Time to 300K = 44ms (this ignores the dump resistor below) [45ms - p.63]
-- Detection time = 13ms (at which the tape has reached 103K peak temperature)
-- Estimated peak temperature after switching to dump resistor = 184K [c.220K - figure 2.44 left - single node adiabatic case, quoted as being 10-30% higher than 1D model]
+- Single front stable propagation velocity = 70.9cm/s [c.67cm/s once stabilised - figure 2.37]
+- Time to 300K = 43ms (this ignores the dump resistor below) [45ms - p.63]
+- Detection time = 23ms (at which the tape has reached 123K peak temperature)
+- Estimated peak temperature after switching to dump resistor = 187K [c.220K - figure 2.44 left - single node adiabatic case, quoted as being 10-30% higher than 1D model]
 
 The results are similar, though there are known differences in e.g. sourcing material property data - I have not used CryoComp as stated in the thesis.
 
@@ -93,16 +95,15 @@ The minimum quench energy for a range of current densities has been calculated a
 |-------------|:---------------:|:--------:|:---------------:|:--------:|:---------------:|:--------:|
 | Current (A) | Velocity (mm/s) | MQE (mJ) | Velocity (mm/s) | MQE (mJ) | Velocity (mm/s) | MQE (mJ) |
 |      50     |        0        |    216   |        14       |    234   |        0%       |    92%   |
-|     150     |        78       |    74    |        76       |    85    |       103%      |    87%   |
-|     250     |       159       |    47    |       140       |    57    |       113%      |    82%   |
-|     400     |       277       |    24    |       259       |    32    |       107%      |    75%   |
-|     600     |       605       |    11    |       500       |    17    |       121%      |    68%   |
-|     1000    |       1963      |     5    |       1500      |     7    |       131%      |    63%   |
+|     150     |        79       |    75    |        76       |    85    |       104%      |    88%   |
+|     250     |       145       |    48    |       140       |    57    |       103%      |    84%   |
+|     400     |       278       |    25    |       259       |    32    |       107%      |    78%   |
+|     600     |       587       |    12    |       500       |    17    |       117%      |    70%   |
+|     1000    |       1884      |     5    |       1500      |     7    |       126%      |    69%   |
 
 These results need further investigation, and the model becomes increasingly conservative as current increases - propagation velocity is increasingly faster than the thesis results, and minimum quench energy is lower. 
 
 ## Assumptions and limitations
-- Hastelloy properties are currently estimates - minimum quench energy and propagation velocity values may shift once replaced with measured data
 - Fixed current (in particular, modelling of dump resistor uses average exponential decay time, and ignores induced voltage)
 - Fixed and uniform field, and field angle
 - Adiabatic

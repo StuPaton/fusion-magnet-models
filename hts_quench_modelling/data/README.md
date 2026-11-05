@@ -10,17 +10,17 @@ These values cover temperatures from 0-300K [0,1,2,...,300], and are formatted w
 |----------|---------------------|--------------|--------------------------------------------------------------------------------------------------|
 | k        | Copper (RRR 50-500) | [1]          | NIST fit evaluated on 1K grid                                                                    |
 | k        | Silver (RRR 30)     | [2]          | Digitised                                                                                        |
-| k        | Hastelloy C-276     |              | Estimated values - replacement with measured data in progress                                    |
+| k        | Hastelloy C-276     | [7]          | Evaluated on 1K grid                                                                             |
 | k        | YBCO (in-plane)     | [3]          | Above 70K: digitised. Below 70K: estimated values - replacement with   measured data in progress |
 | k        | Kapton              | [1]          | Digitised                                                                                        |
 | ρ        | Copper (RRR 150)    | [4] Fig. 8.2 | Digitised                                                                                        |
 | ρ        | Copper (other RRR)  | [1]          | Derived from k via Wiedemann Franz, , L₀ = 2.44×10⁻⁸ WΩ/K²                                       |
 | ρ        | Silver (RRR 30)     | [2]          | Digitised                                                                                        |
-| ρ        | Hastelloy C-276     |              | Estimated values - replacement with measured data in progress                                    |
+| ρ        | Hastelloy C-276     | [7]          | Evaluated on 1K grid                                                                             |
 | ρ        | YBCO                | [3]          | Digitised                                                                                        |
 | c_p      | Copper              | [1]          | NIST fit evaluated on 1K grid                                                                    |
 | c_p      | Silver              | [2]          | Digitised                                                                                        |
-| c_p      | Hastelloy C-276     |              | Estimated values - replacement with measured data in progress                                    |
+| c_p      | Hastelloy C-276     | [7]          | Evaluated on 1K grid                                                                             |
 | c_p      | YBCO                | [5]          | Converted to J / (kg K) using assumed function unit mass of 1.106×10-24 kg                       |
 | c_p      | Kapton              | [1]          | Digitised                                                                                        |
 
@@ -58,3 +58,5 @@ Depth x thermal resistivity slope / intercept (d_x_rho_th_slope / d_x_rho_th_int
 [6] Y. Murakami, H. Goto, Y. Taguchi, Y. Nagasaka et al., "Measurement of Out-of-Plane Thermal Conductivity of
     Epitaxial YBa₂Cu₃O₇₋δ Thin Films in the Temperature Range from 10 K to 300 K by Photothermal Reflectance",
     *International Journal of Thermophysics* 38, 160 (2017). https://doi.org/10.1007/s10765-017-2294-7
+
+[7] J. Lu, E. S. Choi and H. D. Zhou, “Physical properties of Hastelloy® C-276™ at cryogenic temperatures”, *J. Appl. Phys.* **103**, 064908 (2008). doi:10.1063/1.2899058
